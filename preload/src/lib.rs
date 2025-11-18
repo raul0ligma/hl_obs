@@ -16,7 +16,7 @@ enum Source {
 static FD_CLASS: Lazy<DashMap<c_int, Source>> = Lazy::new(DashMap::new);
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-type OpenFn = unsafe extern "C" fn(*const c_char, c_int, ...) -> c_int;
+type OpenatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, c_int) -> c_int;
 type WriteFn = unsafe extern "C" fn(c_int, *const c_void, usize) -> isize;
 type CloseFn = unsafe extern "C" fn(c_int) -> c_int;
 
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn my_openat(dirfd: c_int, pathname: *const c_char, flags:
     if real_fn.is_null() {
         return -1;
     }
-    let real_openat: OpenFn = std::mem::transmute(real_fn);
+    let real_openat: OpenatFn = std::mem::transmute(real_fn);
     let fd = real_openat(dirfd, pathname, flags, mode);
 
     if fd >= 0 {
