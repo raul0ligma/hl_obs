@@ -1,2 +1,17 @@
+## Generated data trees (example and runtime)
+/node_order_statuses_by_block/
+/node_raw_book_diffs_by_block/
+/node_fills_by_block/
+/node_twap_statuses_by_block/
+/preload/node_order_statuses_by_block/
+/preload/node_raw_book_diffs_by_block/
+/preload/node_fills_by_block/
+/preload/node_twap_statuses_by_block/
+
+## Build outputs
+/target/
+
+## macOS metadata
+.DS_Store
 target/
 preload/tmp

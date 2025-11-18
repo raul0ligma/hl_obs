@@ -2,33 +2,121 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::{
     ffi::CStr,
-    os::raw::{c_char, c_int},
-    time::Instant,
+    os::raw::{c_char, c_int, c_void},
+    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
 };
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum Source {
     Statuses,
     Diffs,
     Fills,
 }
-static FD_CLASS: Lazy<DashMap<c_int, Source>> = Lazy::new(|| DashMap::new());
 
-redhook::hook! {
-    unsafe fn openat(dirfd: c_int, pathname: *const c_char, flags: c_int, mode: c_int) -> c_int => my_openat {
-            
-        let fd =  redhook::real!(openat)(dirfd, pathname, flags, mode);
-            
-        println!("called {}", fd);
-        if fd >= 0 && !pathname.is_null() {
-            let path = CStr::from_ptr(pathname).to_string_lossy();
-            println!("called {}", path.clone());
-            if path.contains("node_order_statuses_by_block") { FD_CLASS.insert(fd, Source::Statuses); }
-            else if path.contains("node_raw_book_diffs_by_block") { FD_CLASS.insert(fd, Source::Diffs); }
-            else if path.contains("node_fills_by_block") { FD_CLASS.insert(fd, Source::Fills); }
-        }
-        fd
-    
+static FD_CLASS: Lazy<DashMap<c_int, Source>> = Lazy::new(DashMap::new);
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+type OpenFn = unsafe extern "C" fn(*const c_char, c_int, ...) -> c_int;
+type WriteFn = unsafe extern "C" fn(c_int, *const c_void, usize) -> isize;
+type CloseFn = unsafe extern "C" fn(c_int) -> c_int;
+
+static REAL_OPEN64: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_WRITE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_CLOSE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+
+unsafe fn log_stderr(msg: &str) {
+    libc::write(2, msg.as_ptr() as *const c_void, msg.len());
+}
+
+#[ctor::ctor]
+fn init() {
+    unsafe {
+        log_stderr("[PRELOAD] Initializing hooks...\n");
+
+        let real64 = libc::dlsym(libc::RTLD_NEXT, b"open64\0".as_ptr() as *const _);
+        REAL_OPEN64.store(real64 as *mut (), Ordering::SeqCst);
+
+        let real_write = libc::dlsym(libc::RTLD_NEXT, b"write\0".as_ptr() as *const _);
+        REAL_WRITE.store(real_write as *mut (), Ordering::SeqCst);
+
+        let real_close = libc::dlsym(libc::RTLD_NEXT, b"close\0".as_ptr() as *const _);
+        REAL_CLOSE.store(real_close as *mut (), Ordering::SeqCst);
+
+        INITIALIZED.store(true, Ordering::SeqCst);
+
+        log_stderr("[PRELOAD] Hooks ready!\n");
+    }
+}
+
+unsafe fn classify_fd(fd: c_int, pathname: *const c_char) {
+    if !INITIALIZED.load(Ordering::SeqCst) || fd < 0 || pathname.is_null() {
+        return;
     }
 
+    let path = CStr::from_ptr(pathname).to_string_lossy();
+
+    if path.contains("node_order_statuses_by_block") {
+        log_stderr("[HOOK] Classified FD as Statuses\n");
+        FD_CLASS.insert(fd, Source::Statuses);
+    } else if path.contains("node_raw_book_diffs_by_block") {
+        log_stderr("[HOOK] Classified FD as Diffs\n");
+        FD_CLASS.insert(fd, Source::Diffs);
+    } else if path.contains("node_fills_by_block") {
+        log_stderr("[HOOK] Classified FD as Fills\n");
+        FD_CLASS.insert(fd, Source::Fills);
+    }
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(export_name = "open64")]
+pub unsafe extern "C" fn my_open64(pathname: *const c_char, flags: c_int, mode: c_int) -> c_int {
+    let real_fn = REAL_OPEN64.load(Ordering::SeqCst);
+    if real_fn.is_null() {
+        return -1;
+    }
+
+    let real_open: OpenFn = std::mem::transmute(real_fn);
+    let fd = real_open(pathname, flags, mode);
+    classify_fd(fd, pathname);
+    fd
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(export_name = "write")]
+pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -> isize {
+    let real_fn = REAL_WRITE.load(Ordering::SeqCst);
+    if real_fn.is_null() {
+        return -1;
+    }
+
+    let real_write: WriteFn = std::mem::transmute(real_fn);
+
+    // Check if this FD is tracked and log it
+    if INITIALIZED.load(Ordering::SeqCst) {
+        if let Some(source) = FD_CLASS.get(&fd) {
+            let msg = format!("[HOOK] Write to {:?} (fd={}): {} bytes\n", source.value(), fd, count);
+            libc::write(2, msg.as_ptr() as *const c_void, msg.len());
+        }
+    }
+
+    real_write(fd, buf, count)
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(export_name = "close")]
+pub unsafe extern "C" fn my_close(fd: c_int) -> c_int {
+    if INITIALIZED.load(Ordering::SeqCst) {
+        if FD_CLASS.remove(&fd).is_some() {
+            let msg = format!("[HOOK] Closed tracked fd={}\n", fd);
+            libc::write(2, msg.as_ptr() as *const c_void, msg.len());
+        }
+    }
+
+    let real_fn = REAL_CLOSE.load(Ordering::SeqCst);
+    if real_fn.is_null() {
+        return -1;
+    }
+
+    let real_close: CloseFn = std::mem::transmute(real_fn);
+    real_close(fd)
 }
