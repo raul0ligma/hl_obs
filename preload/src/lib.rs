@@ -13,7 +13,6 @@ enum Source {
     Fills,
 }
 
-static FD_CLASS: Lazy<DashMap<c_int, Source>> = Lazy::new(DashMap::new);
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 type OpenFn = unsafe extern "C" fn(*const c_char, c_int, ...) -> c_int;
@@ -66,11 +65,8 @@ unsafe fn classify_fd(fd: c_int, pathname: *const c_char) {
     let path = CStr::from_ptr(pathname).to_string_lossy();
 
     if path.contains("node_order_statuses_by_block") {
-        FD_CLASS.insert(fd, Source::Statuses);
     } else if path.contains("node_raw_book_diffs_by_block") {
-        FD_CLASS.insert(fd, Source::Diffs);
     } else if path.contains("node_fills_by_block") {
-        FD_CLASS.insert(fd, Source::Fills);
     }
 }
 
@@ -125,9 +121,7 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
 #[unsafe(no_mangle)]
 #[unsafe(export_name = "close")]
 pub unsafe extern "C" fn my_close(fd: c_int) -> c_int {
-    if INITIALIZED.load(Ordering::SeqCst) {
-        let _ = FD_CLASS.remove(&fd);
-    }
+    if INITIALIZED.load(Ordering::SeqCst) {}
 
     let real_fn = REAL_CLOSE.load(Ordering::SeqCst);
     if real_fn.is_null() {
