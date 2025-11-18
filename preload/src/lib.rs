@@ -91,11 +91,11 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
     if real_fn.is_null() {
         return -1;
     }
-    log_stderr("[write] classified\n");
+    // log_stderr("[write] classified\n");
 
     let real_write: WriteFn = std::mem::transmute(real_fn);
 
-    log_stderr("[write] impl called\n");
+    // log_stderr("[write] impl called\n");
     real_write(fd, buf, count)
 }
 
