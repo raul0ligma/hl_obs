@@ -20,7 +20,7 @@ type OpenFn = unsafe extern "C" fn(*const c_char, c_int, ...) -> c_int;
 type WriteFn = unsafe extern "C" fn(c_int, *const c_void, usize) -> isize;
 type CloseFn = unsafe extern "C" fn(c_int) -> c_int;
 
-static REAL_OPEN64: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_OPENAT: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_WRITE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CLOSE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -36,8 +36,8 @@ unsafe fn log_stderr(msg: &str) {
 #[ctor::ctor]
 fn init() {
     unsafe {
-        let real64 = libc::dlsym(libc::RTLD_NEXT, b"open64\0".as_ptr() as *const _);
-        REAL_OPEN64.store(real64 as *mut (), Ordering::SeqCst);
+        let real_openat = libc::dlsym(libc::RTLD_NEXT, b"openat\0".as_ptr() as *const _);
+        REAL_OPENAT.store(real_openat as *mut (), Ordering::SeqCst);
 
         let real_write = libc::dlsym(libc::RTLD_NEXT, b"write\0".as_ptr() as *const _);
         REAL_WRITE.store(real_write as *mut (), Ordering::SeqCst);
@@ -68,19 +68,19 @@ unsafe fn classify_fd(fd: c_int, pathname: *const c_char) {
 }
 
 #[unsafe(no_mangle)]
-#[unsafe(export_name = "open64")]
-pub unsafe extern "C" fn my_open64(pathname: *const c_char, flags: c_int, mode: c_int) -> c_int {
-    let real_fn = REAL_OPEN64.load(Ordering::SeqCst);
+#[unsafe(export_name = "openat")]
+pub unsafe extern "C" fn my_openat(dirfd: c_int, pathname: *const c_char, flags: c_int, mode: c_int) -> c_int {
+    let real_fn = REAL_OPENAT.load(Ordering::SeqCst);
     if real_fn.is_null() {
         return -1;
     }
-    log_stderr("[open64] hook intercepted\n");
+    let real_openat: OpenFn = std::mem::transmute(real_fn);
+    let fd = real_openat(dirfd, pathname, flags, mode);
 
-    let real_open: OpenFn = std::mem::transmute(real_fn);
-    let fd = real_open(pathname, flags, mode);
+    if fd >= 0 {
+        classify_fd(fd, pathname);
+    }
 
-    classify_fd(fd, pathname);
-    log_stderr("[open64] classified\n");
     fd
 }
 
