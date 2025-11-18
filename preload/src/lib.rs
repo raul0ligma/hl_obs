@@ -74,7 +74,7 @@ pub unsafe extern "C" fn my_open64(pathname: *const c_char, flags: c_int, mode: 
     if real_fn.is_null() {
         return -1;
     }
-    log_stderr("[write] hook intercepted\n");
+    log_stderr("[open64] hook intercepted\n");
 
     let real_open: OpenFn = std::mem::transmute(real_fn);
     let fd = real_open(pathname, flags, mode);
