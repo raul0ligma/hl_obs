@@ -1,18 +1,7 @@
-#[allow(unused_imports)]
-use ctor as _;
-#[allow(unused_imports)]
-use dashmap as _;
-use libc::{O_CREAT, O_TRUNC, O_WRONLY, c_int, c_void, close, open, write};
-#[allow(unused_imports)]
-use once_cell as _;
-#[allow(unused_imports)]
-use redhook as _;
 use std::env;
-use std::ffi::CString;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn main() {
     let base_dir = PathBuf::from(env::var("HOME").unwrap_or_default()).join("hl").join("data");
@@ -40,12 +29,8 @@ fn main() {
     ];
 
     for (path, payload) in targets {
-        println!("Opening {}", path.display());
-        let fd = open_file(&path).expect("open failed");
-        write_all(fd, payload).expect("write_all failed");
-        write_all(fd, b"\n").expect("newline write failed");
-        close_file(fd).expect("close failed");
-        println!("Wrote 1 line to {}", path.display());
+        println!("Writing 1 line to {}", path.display());
+        write_one_line(&path, payload).expect("write failed");
     }
 
     // Cleanup: remove created files and prune empty directories if empty
@@ -59,39 +44,14 @@ fn ensure_dir(path: PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-fn open_file(path: &Path) -> io::Result<c_int> {
+fn write_one_line(path: &PathBuf, payload: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let c_path = CString::new(path.as_os_str().as_bytes()).expect("CString path");
-    let mode = 0o644;
-    let flags = O_CREAT | O_WRONLY | O_TRUNC;
-    let fd = unsafe { open(c_path.as_ptr(), flags, mode) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(fd)
-}
-
-fn write_all(fd: c_int, buf: &[u8]) -> io::Result<()> {
-    let mut written = 0usize;
-    while written < buf.len() {
-        let ptr = unsafe { buf.as_ptr().add(written) } as *const c_void;
-        let n = unsafe { write(fd, ptr, buf.len() - written) };
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        written += n as usize;
-    }
-    Ok(())
-}
-
-fn close_file(fd: c_int) -> io::Result<()> {
-    let rc = unsafe { close(fd) };
-    if rc < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    let mut data = Vec::with_capacity(payload.len() + 1);
+    data.extend_from_slice(payload);
+    data.push(b'\n');
+    fs::write(path, data)
 }
 
 fn cleanup(date_part: &str) -> io::Result<()> {
