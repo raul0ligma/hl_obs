@@ -25,7 +25,12 @@ static REAL_WRITE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CLOSE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 
 unsafe fn log_stderr(msg: &str) {
-    libc::syscall(1 as c_int, 2, msg.as_ptr() as *const c_void, msg.len());
+    // assuming we have it inited
+    let real_fn: *mut () = REAL_WRITE.load(Ordering::Relaxed);
+    if !real_fn.is_null() {
+        let real_write: WriteFn = std::mem::transmute(real_fn);
+        real_write(2, msg.as_ptr() as *const c_void, msg.len());
+    }
 }
 
 #[ctor::ctor]
@@ -42,7 +47,7 @@ fn init() {
 
         INITIALIZED.store(true, Ordering::SeqCst);
 
-        // log_stderr("[preload] hooks ready\n");
+        log_stderr("[preload] hooks ready\n");
     }
 }
 
