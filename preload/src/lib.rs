@@ -69,7 +69,7 @@ pub unsafe extern "C" fn my_open64(pathname: *const c_char, flags: c_int, mode: 
     if real_fn.is_null() {
         return -1;
     }
-    log_stderr("[open64] hook intercepted\n");
+    log_stderr("[write] hook intercepted\n");
 
     let real_open: OpenFn = std::mem::transmute(real_fn);
     let fd = real_open(pathname, flags, mode);
@@ -86,9 +86,18 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
     if real_fn.is_null() {
         return -1;
     }
+    log_stderr("[write] classified\n");
+
+    if INITIALIZED.load(Ordering::SeqCst) {
+        if let Some(source) = FD_CLASS.get(&fd) {
+            // we would send info from here, just in place to avoid recursive calls
+            log_stderr(&format!("[WRITE] {:?} fd={} size={}\n", source.value(), fd, count));
+        }
+    }
 
     let real_write: WriteFn = std::mem::transmute(real_fn);
 
+    log_stderr("[write] impl called\n");
     real_write(fd, buf, count)
 }
 
