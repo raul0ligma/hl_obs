@@ -15,11 +15,12 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    let base_dir = PathBuf::from(env::var("HOME").unwrap_or_default()).join("hl").join("data");
+    println!("Base dir: {}", base_dir.display());
     println!("Creating folder structure and exercising open → write → close");
 
     let date_part = "20251116";
     let base_dirs = ["node_order_statuses_by_block", "node_raw_book_diffs_by_block", "node_fills_by_block"];
-    let base_dir = PathBuf::from(env::var("HOME").unwrap_or_default()).join("hl").join("data");
 
     for base in &base_dirs {
         ensure_dir(base_dir.join(base).join("hourly").join(date_part)).expect("failed to create directory tree");
@@ -39,10 +40,12 @@ fn main() {
     ];
 
     for (path, payload) in targets {
+        println!("Opening {}", path.display());
         let fd = open_file(&path).expect("open failed");
         write_all(fd, payload).expect("write_all failed");
         write_all(fd, b"\n").expect("newline write failed");
         close_file(fd).expect("close failed");
+        println!("Wrote 1 line to {}", path.display());
     }
 
     // Cleanup: remove created files and prune empty directories if empty

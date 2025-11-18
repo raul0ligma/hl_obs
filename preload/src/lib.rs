@@ -31,8 +31,6 @@ unsafe fn log_stderr(msg: &str) {
 #[ctor::ctor]
 fn init() {
     unsafe {
-        log_stderr("[PRELOAD] Initializing hooks...\n");
-
         let real64 = libc::dlsym(libc::RTLD_NEXT, b"open64\0".as_ptr() as *const _);
         REAL_OPEN64.store(real64 as *mut (), Ordering::SeqCst);
 
@@ -44,7 +42,7 @@ fn init() {
 
         INITIALIZED.store(true, Ordering::SeqCst);
 
-        log_stderr("[PRELOAD] Hooks ready!\n");
+        log_stderr("[preload] hooks ready\n");
     }
 }
 
@@ -56,13 +54,10 @@ unsafe fn classify_fd(fd: c_int, pathname: *const c_char) {
     let path = CStr::from_ptr(pathname).to_string_lossy();
 
     if path.contains("node_order_statuses_by_block") {
-        log_stderr("[HOOK] Classified FD as Statuses\n");
         FD_CLASS.insert(fd, Source::Statuses);
     } else if path.contains("node_raw_book_diffs_by_block") {
-        log_stderr("[HOOK] Classified FD as Diffs\n");
         FD_CLASS.insert(fd, Source::Diffs);
     } else if path.contains("node_fills_by_block") {
-        log_stderr("[HOOK] Classified FD as Fills\n");
         FD_CLASS.insert(fd, Source::Fills);
     }
 }
@@ -91,14 +86,6 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
 
     let real_write: WriteFn = std::mem::transmute(real_fn);
 
-    // Check if this FD is tracked and log it
-    if INITIALIZED.load(Ordering::SeqCst) {
-        if let Some(source) = FD_CLASS.get(&fd) {
-            let msg = format!("[HOOK] Write to {:?} (fd={}): {} bytes\n", source.value(), fd, count);
-            libc::write(2, msg.as_ptr() as *const c_void, msg.len());
-        }
-    }
-
     real_write(fd, buf, count)
 }
 
@@ -106,10 +93,7 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
 #[unsafe(export_name = "close")]
 pub unsafe extern "C" fn my_close(fd: c_int) -> c_int {
     if INITIALIZED.load(Ordering::SeqCst) {
-        if FD_CLASS.remove(&fd).is_some() {
-            let msg = format!("[HOOK] Closed tracked fd={}\n", fd);
-            libc::write(2, msg.as_ptr() as *const c_void, msg.len());
-        }
+        let _ = FD_CLASS.remove(&fd);
     }
 
     let real_fn = REAL_CLOSE.load(Ordering::SeqCst);
