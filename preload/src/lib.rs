@@ -25,7 +25,7 @@ static REAL_WRITE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CLOSE: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
 
 unsafe fn log_stderr(msg: &str) {
-    libc::write(2, msg.as_ptr() as *const c_void, msg.len());
+    libc::syscall(1 as c_int, 2, msg.as_ptr() as *const c_void, msg.len());
 }
 
 #[ctor::ctor]
@@ -42,7 +42,7 @@ fn init() {
 
         INITIALIZED.store(true, Ordering::SeqCst);
 
-        log_stderr("[preload] hooks ready\n");
+        // log_stderr("[preload] hooks ready\n");
     }
 }
 
@@ -87,13 +87,6 @@ pub unsafe extern "C" fn my_write(fd: c_int, buf: *const c_void, count: usize) -
         return -1;
     }
     log_stderr("[write] classified\n");
-
-    if INITIALIZED.load(Ordering::SeqCst) {
-        if let Some(source) = FD_CLASS.get(&fd) {
-            // we would send info from here, just in place to avoid recursive calls
-            log_stderr(&format!("[WRITE] {:?} fd={} size={}\n", source.value(), fd, count));
-        }
-    }
 
     let real_write: WriteFn = std::mem::transmute(real_fn);
 
